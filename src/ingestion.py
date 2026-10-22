@@ -48,11 +48,68 @@ METADONNEES = {
 
 
 def nettoyer_texte(texte):
-    """Nettoyer les espaces sans supprimer le contenu utile."""
+    """Nettoyer les espaces et corriger les caractères connus."""
+
+    # Supprimer les caractères nuls
     texte = texte.replace("\x00", "")
+
+    # Remplacer les ligatures typographiques
+    texte = texte.replace("\ufb01", "fi")
+    texte = texte.replace("\ufb02", "fl")
+
+    # Corriger les accents aigus mal extraits sans supprimer
+    # l'espace qui précède le mot
+    accents_aigus = {
+        "a": "á", "e": "é", "i": "í",
+        "o": "ó", "u": "ú",
+        "A": "Á", "E": "É", "I": "Í",
+        "O": "Ó", "U": "Ú"
+    }
+    texte = re.sub(
+        r"´\s*([aeiouAEIOU])",
+        lambda m: accents_aigus[m.group(1)],
+        texte
+    )
+
+    # Corriger les accents graves mal extraits
+    accents_graves = {
+        "a": "à", "e": "è", "u": "ù",
+        "A": "À", "E": "È", "U": "Ù"
+    }
+    texte = re.sub(
+        r"`\s*([aeuAEU])",
+        lambda m: accents_graves[m.group(1)],
+        texte
+    )
+
+    # Corriger le caractère mal extrait dans certains mots
+    texte = texte.replace("re¸ cu", "reçu")
+    texte = texte.replace("re¸cu", "reçu")
+
+    # Corriger quelques espaces indésirables dans les mots
+    texte = texte.replace("D étection", "Détection")
+# Corriger uniquement les espaces indésirables confirmés
+    texte = texte.replace("entit é", "entité")
+    texte = texte.replace("entitéafin", "entité afin")
+
+    # Corriger les espaces manquants dans les expressions identifiées
+    texte = texte.replace("l’accèsà", "l’accès à")
+    texte = texte.replace("Entitésà", "Entités à")
+    texte = texte.replace("seulélément", "seul élément")
+    texte = texte.replace("deuxéléments", "deux éléments")
+    texte = texte.replace("carteà puce", "carte à puce")
+
+    # Corriger les anomalies confirmées dans le corpus
+    texte = texte.replace("Introductionà", "Introduction à")
+    texte = texte.replace("contrˆole", "contrôle")
+
+    # Normaliser les espaces
     texte = re.sub(r"[ \t]+", " ", texte)
     texte = re.sub(r"\n{3,}", "\n\n", texte)
+
     return texte.strip()
+
+
 
 
 def extraire_documents():
