@@ -1,0 +1,6 @@
+# Fichiers temporaires Python
+__pycache__/
+*.py[cod]
+
+# Environnement virtuel
+.venv/
