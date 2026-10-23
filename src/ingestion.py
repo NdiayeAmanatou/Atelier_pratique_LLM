@@ -1,13 +1,20 @@
 
 from pathlib import Path
 import re
-
+import unicodedata
+import pandas as pd
 from pypdf import PdfReader
 
 
-DOSSIER_PDF = Path("data")
+# 1. Définir les chemins du projet
+RACINE = Path(__file__).resolve().parent.parent
+DOSSIER_PDF = RACINE / "data"
 
-# Métadonnées des documents décrits dans SOURCES.md
+FICHIER_BRUT = DOSSIER_PDF / "dataset_brut.csv"
+FICHIER_NETTOYE = DOSSIER_PDF / "dataset_nettoye.csv"
+
+
+# 2. Métadonnées des cinq documents PDF
 METADONNEES = {
     "cybersec.pdf": {
         "titre": "Introduction à la Cybersécurité",
@@ -47,116 +54,255 @@ METADONNEES = {
 }
 
 
+# 3. Nettoyer le texte extrait
 def nettoyer_texte(texte):
-    """Nettoyer les espaces et corriger les caractères connus."""
+    """Nettoyer les caractères et espaces connus dans le corpus."""
 
-    # Supprimer les caractères nuls
+    texte = unicodedata.normalize("NFKC", texte)
+
+        # Corriger les accents aigus mal extraits des PDF.
+    accents = {
+        "a": "á", "e": "é", "i": "í", "o": "ó", "u": "ú",
+        "A": "Á", "E": "É", "I": "Í", "O": "Ó", "U": "Ú",
+    }
+
+    # Exemple : "l’ ́epreuve" -> "l’épreuve"
+    # Exemple : "4 ́etats" -> "4 états"
+    texte = re.sub(
+        r"([A-Za-z0-9’'])\s*\u0301\s*([aeiouAEIOU])",
+        lambda m: m.group(1) + accents[m.group(2)],
+        texte,
+    )
+
+    # Exemple : " ́Etape" -> "Étape"
+    texte = re.sub(
+        r"\u0301\s*([aeiouAEIOU])",
+        lambda m: accents[m.group(1)],
+        texte,
+    )
+
+    # Exemple : "utilise ́" -> "utilisé"
+    texte = re.sub(
+        r"([aeiouAEIOU])\s*\u0301",
+        lambda m: accents[m.group(1)],
+        texte,
+    )
+
+    # Corriger les cédilles mal extraites.
+    # Exemple : "conc ̧u" -> "conçu"
+    texte = re.sub(r"([cC])\s*\u0327", r"\1̧", texte)
+
+    # Exemple : "re ̧ cu" -> "reçu"
+    texte = re.sub(r"\s*\u0327\s*([cC])", r"̧\1", texte)
+
+    # Réunir les caractères accentués lorsque c'est possible.
+    texte = unicodedata.normalize("NFC", texte)
+        # Corriger les accents aigus mal extraits des PDF.
+    accents_aigus_unicode = {
+        "a": "á",
+        "e": "é",
+        "i": "í",
+        "o": "ó",
+        "u": "ú",
+        "A": "Á",
+        "E": "É",
+        "I": "Í",
+        "O": "Ó",
+        "U": "Ú",
+    }
+
+    # Exemple : "D ́etection" devient "Détection".
+    texte = re.sub(
+    r"([A-Za-z])\s+\u0301\s*([aeiouAEIOU])",
+    lambda m: m.group(1) + accents_aigus_unicode[m.group(2)],
+    texte,
+    )
+
+    # Uniformiser la représentation Unicode des caractères.
+    texte = unicodedata.normalize("NFC", texte)
     texte = texte.replace("\x00", "")
+    texte = texte.replace("\u00a0", " ")
+    texte = texte.replace("\u200b", "")
+    texte = texte.replace("\ufeff", "")
 
-    # Remplacer les ligatures typographiques
-    texte = texte.replace("\ufb01", "fi")
-    texte = texte.replace("\ufb02", "fl")
-
-    # Corriger les accents aigus mal extraits sans supprimer
-    # l'espace qui précède le mot
+    # Corriger certains accents mal extraits
     accents_aigus = {
         "a": "á", "e": "é", "i": "í",
         "o": "ó", "u": "ú",
         "A": "Á", "E": "É", "I": "Í",
-        "O": "Ó", "U": "Ú"
+        "O": "Ó", "U": "Ú",
     }
     texte = re.sub(
         r"´\s*([aeiouAEIOU])",
         lambda m: accents_aigus[m.group(1)],
-        texte
+        texte,
     )
 
-    # Corriger les accents graves mal extraits
     accents_graves = {
         "a": "à", "e": "è", "u": "ù",
-        "A": "À", "E": "È", "U": "Ù"
+        "A": "À", "E": "È", "U": "Ù",
     }
     texte = re.sub(
         r"`\s*([aeuAEU])",
         lambda m: accents_graves[m.group(1)],
-        texte
+        texte,
     )
 
-    # Corriger le caractère mal extrait dans certains mots
-    texte = texte.replace("re¸ cu", "reçu")
-    texte = texte.replace("re¸cu", "reçu")
+    # Corrections ciblées observées dans les PDF
+    corrections = {
+        "4Détection d’intrusion": "4 Détection d’intrusion",
+        "séances decours": "séances de cours",
+        "re¸ cu": "reçu",
+        "re¸cu": "reçu",
+        "D étection": "Détection",
+        "entit é": "entité",
+        "entitéafin": "entité afin",
+        "l’accèsà": "l’accès à",
+        "Entitésà": "Entités à",
+        "seulélément": "seul élément",
+        "deuxéléments": "deux éléments",
+        "carteà puce": "carte à puce",
+        "Introductionà": "Introduction à",
+        "contrˆole": "contrôle",
+    }
 
-    # Corriger quelques espaces indésirables dans les mots
-    texte = texte.replace("D étection", "Détection")
-# Corriger uniquement les espaces indésirables confirmés
-    texte = texte.replace("entit é", "entité")
-    texte = texte.replace("entitéafin", "entité afin")
+    for ancien, nouveau in corrections.items():
+        texte = texte.replace(ancien, nouveau)
 
-    # Corriger les espaces manquants dans les expressions identifiées
-    texte = texte.replace("l’accèsà", "l’accès à")
-    texte = texte.replace("Entitésà", "Entités à")
-    texte = texte.replace("seulélément", "seul élément")
-    texte = texte.replace("deuxéléments", "deux éléments")
-    texte = texte.replace("carteà puce", "carte à puce")
-
-    # Corriger les anomalies confirmées dans le corpus
-    texte = texte.replace("Introductionà", "Introduction à")
-    texte = texte.replace("contrˆole", "contrôle")
-
-    # Normaliser les espaces
+    # Normaliser les espaces sans supprimer les séparations utiles
     texte = re.sub(r"[ \t]+", " ", texte)
-    texte = re.sub(r"\n{3,}", "\n\n", texte)
+    texte = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", texte)
 
     return texte.strip()
 
 
+# 4. Extraire les PDF une seule fois
+def extraire_donnees():
+    donnees_brutes = []
+    documents_nettoyes = []
+    identifiant = 1
 
-
-def extraire_documents():
-    documents = []
     fichiers_pdf = sorted(DOSSIER_PDF.glob("*.pdf"))
+
+    if not fichiers_pdf:
+        print(f"Aucun PDF trouvé dans : {DOSSIER_PDF}")
+        return donnees_brutes, documents_nettoyes
 
     for fichier in fichiers_pdf:
         print(f"Lecture du fichier : {fichier.name}")
 
-        lecteur = PdfReader(str(fichier))
         metadonnees = METADONNEES.get(fichier.name, {})
+        lecteur = PdfReader(str(fichier))
 
         for numero, page in enumerate(lecteur.pages, start=1):
             texte_brut = page.extract_text() or ""
-            texte = nettoyer_texte(texte_brut)
 
-            # Ignorer les pages sans texte exploitable
-            if not texte:
+            # Ignorer les pages sans texte extrait
+            if not texte_brut.strip():
                 continue
 
-            documents.append({
-                "texte": texte,
-                "source": fichier.name,
-                "page": numero,
+            texte_nettoye = nettoyer_texte(texte_brut)
+
+            # Métadonnées communes aux deux datasets
+            informations = {
+                "id": identifiant,
                 "titre": metadonnees.get("titre", fichier.stem),
                 "auteur": metadonnees.get("auteur"),
                 "organisme": metadonnees.get("organisme"),
-                "date": metadonnees.get("date"),
+                "date_publication": metadonnees.get("date"),
+                "source": fichier.name,
+                "page": numero,
                 "url": metadonnees.get("url"),
+            }
+
+            # Dataset brut : texte avant nettoyage
+            donnees_brutes.append({
+                **informations,
+                "texte": texte_brut,
             })
 
-    return documents
+            # Dataset nettoyé : texte après nettoyage
+            if texte_nettoye:
+                documents_nettoyes.append({
+                    **informations,
+                    "texte": texte_nettoye,
+                })
+
+            identifiant += 1
+
+    return donnees_brutes, documents_nettoyes
+
+
+# 5. Fonction conservée pour le pipeline RAG existant
+def extraire_documents():
+    """Retourner les documents nettoyés pour le pipeline RAG."""
+
+    _, documents_nettoyes = extraire_donnees()
+
+    # Conserver les clés attendues par l'ancien code
+    documents_rag = []
+
+    for document in documents_nettoyes:
+        documents_rag.append({
+            "texte": document["texte"],
+            "source": document["source"],
+            "page": document["page"],
+            "titre": document["titre"],
+            "auteur": document["auteur"],
+            "organisme": document["organisme"],
+            "date": document["date_publication"],
+            "url": document["url"],
+        })
+
+    return documents_rag
+
+
+# 6. Créer les deux CSV quand on exécute ce fichier
+def main():
+    DOSSIER_PDF.mkdir(parents=True, exist_ok=True)
+
+    donnees_brutes, documents_nettoyes = extraire_donnees()
+
+    if not donnees_brutes:
+        print("Aucune donnée extraite. Vérifie les PDF dans le dossier data.")
+        return
+
+    colonnes = [
+        "id",
+        "titre",
+        "auteur",
+        "organisme",
+        "date_publication",
+        "source",
+        "page",
+        "url",
+        "texte",
+    ]
+
+    df_brut = pd.DataFrame(donnees_brutes, columns=colonnes)
+    df_nettoye = pd.DataFrame(documents_nettoyes, columns=colonnes)
+
+    df_brut.to_csv(FICHIER_BRUT, index=False, encoding="utf-8-sig")
+    df_nettoye.to_csv(FICHIER_NETTOYE, index=False, encoding="utf-8-sig")
+
+    print("\n--- Résultat de la préparation des données ---")
+    print(f"Dataset brut créé : {FICHIER_BRUT}")
+    print(f"Dataset nettoyé créé : {FICHIER_NETTOYE}")
+    print(f"Pages extraites : {len(df_brut)}")
+    print(f"Pages conservées après nettoyage : {len(df_nettoye)}")
+    print(f"URL manquantes : {df_brut['url'].isna().sum()}")
+    print(
+        "Dates manquantes : "
+        f"{df_brut['date_publication'].isna().sum()}"
+    )
+
+    print("\n--- Exemple de données nettoyées ---")
+    print(
+        df_nettoye[["source", "page", "texte"]]
+        .head(3)
+        .to_string(index=False)
+    )
 
 
 if __name__ == "__main__":
-    documents = extraire_documents()
-
-    print("\n--- Résultat de l'extraction ---")
-    print(f"Nombre de pages avec du texte : {len(documents)}")
-
-    if documents:
-        exemple = documents[0]
-
-        print("\n--- Exemple de page extraite ---")
-        print("Source :", exemple["source"])
-        print("Titre :", exemple["titre"])
-        print("Page :", exemple["page"])
-        print("Date :", exemple["date"])
-        print("URL :", exemple["url"])
-        print("Texte :", exemple["texte"][:500])
+    main()
