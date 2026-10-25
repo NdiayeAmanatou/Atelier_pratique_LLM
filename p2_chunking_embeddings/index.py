@@ -6,8 +6,8 @@ import chromadb
 # --- Réglages ---
 CHEMIN_DATASET = "data/dataset_nettoye.csv"
 LONGUEUR_MIN = 60   # pages de moins de 60 caractères (après nettoyage) écartées
-CHUNK_SIZE = 1500   # decoupage en caratere equivaut a 400 tokens
-CHUNK_OVERLAP = 225. # le chevauchement en caractere equivaut a 60 tokens
+CHUNK_SIZE = 1500   # decoupage en caratere equivaut a 375 tokens
+CHUNK_OVERLAP = 225. # le chevauchement en caractere equivaut a 56,25 tokens
 MODELE = "intfloat/multilingual-e5-small"
 
 # --- Chargement du dataset ---
