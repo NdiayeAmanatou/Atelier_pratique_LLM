@@ -5,3 +5,11 @@ __pycache__/
 # Environnement virtuel
 
 .venv/
+# Base vectorielle générée par index.py
+chroma_db/
+
+# Clés d'API et variables secrètes
+.env
+
+# Autre nom courant d'environnement virtuel
+venv/

@@ -1,11 +1,14 @@
 import pandas as pd
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer
+import chromadb
 
 # --- Réglages ---
 CHEMIN_DATASET = "data/dataset_nettoye.csv"
 LONGUEUR_MIN = 60   # pages de moins de 60 caractères (après nettoyage) écartées
-CHUNK_SIZE = 1600   # decoupage en caratere equivaut a 400 tokens
-CHUNK_OVERLAP = 240. # le chevauchement en caractere equivaut a 60 tokens
+CHUNK_SIZE = 1500   # decoupage en caratere equivaut a 400 tokens
+CHUNK_OVERLAP = 225. # le chevauchement en caractere equivaut a 60 tokens
+MODELE = "intfloat/multilingual-e5-small"
 
 # --- Chargement du dataset ---
 df = pd.read_csv(CHEMIN_DATASET)
@@ -64,10 +67,11 @@ splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=C
 #print("la longueur de chaque chunk :\n", [len(m) for m in morceaux])
 
 # le chevauchement (la fin du premier chunk)
-#print(morceaux[0][-240:])
+#print(morceaux[0][-225:])
 
 # le chevauchement (le début du deuxième)
-#print(morceaux[1][:240])
+#print(morceaux[1][:225])
+
 
 # --- Découpage de toutes les pages en chunks ---
 ids = []
@@ -96,6 +100,83 @@ print("Trois listes de même longueur :", len(ids) == len(documents) == len(meta
 print(pd.Series([len(d) for d in documents]).describe())
 
 print("--- Exemple : chunk n°100 ---")
-print(documents[100])
-print(metadatas[100])
+# print(documents[100])
+# print(metadatas[100])
 
+# --- Embeddings : vérification de la longueur des chunks ---
+model = SentenceTransformer(MODELE)
+
+print("Longueur max du modèle (tokens) :", model.max_seq_length)
+
+nb_tokens = [
+    len(model.tokenizer.encode("passage: " + d, add_special_tokens=True))
+    for d in documents
+]
+
+print("Nombre maximal de tokens :", max(nb_tokens))
+
+print("Nombre de chunks dépassant 512 tokens :",
+      sum(n > model.max_seq_length for n in nb_tokens))
+
+
+# --- Génération des embeddings de tous les chunks ---
+
+# Ajouter le préfixe passage: à chaque chunk
+documents_prefixes = ["passage: " + d for d in documents]
+
+
+# on Calcule les embeddings
+embeddings = model.encode(
+    documents_prefixes,
+    batch_size=32,
+    normalize_embeddings=True,
+    show_progress_bar=True
+)
+
+# Vérification des résultats
+print("Forme des embeddings :", embeddings.shape)
+print("Nombre d'embeddings :", len(embeddings))
+print("Dimensions d'un embedding :", embeddings.shape[1])
+
+
+# --- Initialisation de ChromaDB ---
+
+client = chromadb.PersistentClient(
+    path="data/chroma_db"
+)
+
+collection = client.get_or_create_collection(
+    name="corpus_llm",
+    metadata={"hnsw:space": "cosine"}
+)
+
+print("Base vectorielle initialisée avec succès !")
+print("Nom de la collection :", collection.name)
+print("Nombre de documents :", collection.count())
+
+# --- Insertion des données dans ChromaDB ---
+
+collection.upsert(
+    ids=ids,
+    documents=documents,
+    embeddings=embeddings.tolist(),
+    metadatas=metadatas
+)
+
+print("Indexation terminée !")
+print("Nombre de chunks enregistrés :", collection.count())
+
+# peek() permet de consulter quelques éléments de la collection pour vérifier que les données ont bien été enregistrées.
+print("Nombre d'embeddings enregistrés :",
+      collection.count())
+
+print("Exemple de document enregistré :",
+      collection.peek(limit=1))
+
+# Récupérer un élément de la collection (c'est juste une petite verification pour voir si la dimension d'un vecteur est bien respecte a 384)
+exemple = collection.peek(limit=1)
+
+print("Identifiant :", exemple["ids"][0])
+print("Dimensions du vecteur :",
+      exemple["embeddings"].shape[1])
+print("Métadonnées :", exemple["metadatas"][0])
